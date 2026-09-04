@@ -84,15 +84,22 @@ def generar_excel_casos(casos):
         ws.row_dimensions[fila].height = 26
         fila += 1
 
-        objetivo = caso.get("objetivo", "")
-        if objetivo:
+        precondiciones = caso.get("precondiciones", [])
+        if precondiciones:
             ws.merge_cells(f"A{fila}:B{fila}")
             celda = ws[f"A{fila}"]
-            celda.value = "Objetivo: " + objetivo
-            celda.font = Font(name="Arial", size=10, italic=True)
-            celda.alignment = Alignment(wrap_text=True, vertical="center")
-            ws.row_dimensions[fila].height = 30
+            celda.value = "Antes de empezar necesitas:"
+            celda.font = Font(name="Arial", size=10, bold=True)
+            ws.row_dimensions[fila].height = 20
             fila += 1
+            for pre in precondiciones:
+                ws[f"A{fila}"] = "\u2022"
+                ws[f"A{fila}"].alignment = Alignment(horizontal="center")
+                ws[f"B{fila}"] = pre
+                ws[f"B{fila}"].font = Font(name="Arial", size=10)
+                ws[f"B{fila}"].alignment = Alignment(wrap_text=True, vertical="center")
+                ws.row_dimensions[fila].height = 20
+                fila += 1
 
         for paso in caso.get("pasos", []):
             ws[f"A{fila}"] = "\u2610"
@@ -147,7 +154,7 @@ def generar_respuesta(pregunta, chunks, historial):
     system_prompt += "- Usa formato visual y amigable: puedes usar **negritas** (con doble asterisco) para resaltar palabras clave o titulos cortos, y guiones (- ) para listas. NO uses tablas con simbolos pipe ni numerales tipo ### para titulos, eso se ve mal. Usa saltos de linea para separar ideas, como si chatearas por WhatsApp pero mas cuidado.\n"
     system_prompt += "- Cuando dieras 2 o mas casos de prueba en una sola respuesta, o el usuario pida explicitamente un Excel o algo para marcar/checar, ademas de tu respuesta normal y amigable en el chat, agrega AL FINAL de tu mensaje un bloque de datos oculto (el usuario no vera este bloque, se usa para generar un Excel descargable) con este formato EXACTO:\n"
     system_prompt += "===EXCEL_DATA===\n"
-    system_prompt += '[{\"nombre\": \"Nombre corto del caso\", \"objetivo\": \"objetivo en una frase\", \"pasos\": [\"paso 1\", \"paso 2\"], \"resultado_esperado\": [\"resultado 1\", \"resultado 2\"]}]\n'
+    system_prompt += '[{\"nombre\": \"Nombre corto del caso\", \"objetivo\": \"objetivo en una frase\", \"precondiciones\": [\"precondicion 1\", \"precondicion 2\"], \"pasos\": [\"paso 1\", \"paso 2\"], \"resultado_esperado\": [\"resultado 1\", \"resultado 2\"]}]\n'
     system_prompt += "===END_EXCEL_DATA===\n"
     system_prompt += "Ese bloque debe ser JSON valido (comillas dobles, sin comas sobrantes), un objeto por cada caso de prueba. No uses este bloque si solo estas dando UN caso de prueba o si no te pidieron casos de prueba.\n"
     system_prompt += "- Manten un tono profesional pero calido y eficiente, el cliente probablemente tiene poco tiempo.\n\n"
