@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<title>PeopleTech - Asistente de Pruebas</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    font-family: 'Segoe UI', Arial, sans-serif;
+    background: #f4f6f8;
+    margin: 0;
+    padding: 0;
+    color: #1a1a2e;
+  }
+  header {
+    background: #1a1a2e;
+    color: white;
+    padding: 20px 40px;
+  }
+  header h1 { font-size: 20px; margin: 0; font-weight: 600; }
+  .container { max-width: 800px; margin: 40px auto; padding: 0 20px; }
+  .card {
+    background: white; border-radius: 12px; padding: 24px;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.06); margin-bottom: 20px;
+  }
+  .card p.subtitle { color: #666; margin-top: 0; font-size: 14px; }
+  textarea {
+    width: 100%; height: 90px; font-size: 15px; padding: 12px;
+    border: 1px solid #d8dce1; border-radius: 8px; resize: vertical; font-family: inherit;
+  }
+  textarea:focus { outline: none; border-color: #4f5df0; }
+  button {
+    margin-top: 12px; padding: 10px 24px; font-size: 15px; font-weight: 600;
+    cursor: pointer; background: #4f5df0; color: white; border: none; border-radius: 8px;
+  }
+  button:hover { background: #3d49d1; }
+  button:disabled { background: #b3b8f0; cursor: not-allowed; }
+  #loading { display: none; margin-left: 12px; color: #666; font-size: 14px; }
+  #respuesta-card { display: none; }
+  #respuesta { white-space: pre-wrap; line-height: 1.6; font-size: 15px; }
+  #fuentes {
+    margin-top: 16px; padding-top: 12px; border-top: 1px solid #eee;
+    font-size: 13px; color: #888;
+  }
+  .badge {
+    display: inline-block; background: #eef0fe; color: #4f5df0;
+    padding: 3px 10px; border-radius: 12px; font-size: 12px; margin-right: 6px; margin-top: 4px;
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>PeopleTech &middot; Asistente de Pruebas</h1>
+</header>
+
+<div class="container">
+  <div class="card">
+    <p class="subtitle">Pregunta lo que necesites validar del sistema de nomina, o pide un caso de prueba.</p>
+    <textarea id="pregunta" placeholder="Ej: Genera un caso de prueba para validar el calculo de dias de aguinaldo..."></textarea>
+    <br>
+    <button id="btn" onclick="preguntar()">Preguntar</button>
+    <span id="loading">Buscando en manuales y normativa...</span>
+  </div>
+
+  <div class="card" id="respuesta-card">
+    <div id="respuesta"></div>
+    <div id="fuentes"></div>
+  </div>
+</div>
+
+<script>
+const API_URL = "http://127.0.0.1:8000/preguntar";
+
+function preguntar() {
+  const pregunta = document.getElementById("pregunta").value;
+  if (!pregunta.trim()) return;
+
+  const btn = document.getElementById("btn");
+  btn.disabled = true;
+  document.getElementById("loading").style.display = "inline";
+  document.getElementById("respuesta-card").style.display = "none";
+
+  fetch(API_URL, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ pregunta: pregunta })
+  })
+  .then(function(res) { return res.json(); })
+  .then(function(data) {
+    document.getElementById("respuesta").innerText = data.respuesta;
+    document.getElementById("respuesta-card").style.display = "block";
+
+    const fuentesDiv = document.getElementById("fuentes");
+    fuentesDiv.innerHTML = "";
+    if (data.fuentes && data.fuentes.length > 0) {
+      let html = "Fuentes consultadas: ";
+      for (let i = 0; i < data.fuentes.length; i++) {
+        html += '<span class="badge">' + data.fuentes[i] + '</span>';
+      }
+      fuentesDiv.innerHTML = html;
+    }
+  })
+  .catch(function(error) {
+    document.getElementById("respuesta").innerText = "Error al conectar con el servidor: " + error;
+    document.getElementById("respuesta-card").style.display = "block";
+  })
+  .finally(function() {
+    btn.disabled = false;
+    document.getElementById("loading").style.display = "none";
+  });
+}
+</script>
+
+</body>
+</html>
