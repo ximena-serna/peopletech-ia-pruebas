@@ -62,65 +62,68 @@ def buscar_chunks_relevantes(embedding_pregunta, texto_pregunta):
     return resultado.data
 
 
-def generar_excel_casos(casos):
+def generar_excel_casos(casos, titulo="Casos de Prueba"):
     wb = openpyxl.Workbook()
     ws = wb.active
     ws.title = "Casos de Prueba"
 
     azul_header = "1A1A2E"
-    verde_ok = "D9F2E3"
+    gris_header = "D9D9D9"
 
-    ws.column_dimensions["A"].width = 4
-    ws.column_dimensions["B"].width = 65
+    ws.column_dimensions["A"].width = 35
+    ws.column_dimensions["B"].width = 55
+    ws.column_dimensions["C"].width = 14
+    ws.column_dimensions["D"].width = 10
+    ws.column_dimensions["E"].width = 14
+    ws.column_dimensions["F"].width = 14
+    ws.column_dimensions["G"].width = 30
 
-    fila = 1
+    ws.merge_cells("A1:G1")
+    ws["A1"] = titulo.upper()
+    ws["A1"].font = Font(name="Arial", size=13, bold=True, color="FFFFFF")
+    ws["A1"].fill = PatternFill(start_color=azul_header, end_color=azul_header, fill_type="solid")
+    ws.row_dimensions[1].height = 24
+
+    encabezados = ["Caso de Prueba", "Descripcion", "Prueba Cliente", "Error", "Prueba Exitosa", "Terminado", "Nota"]
+    for col_idx, texto in enumerate(encabezados, start=1):
+        celda = ws.cell(row=2, column=col_idx, value=texto)
+        celda.font = Font(name="Arial", size=10, bold=True)
+        celda.fill = PatternFill(start_color=gris_header, end_color=gris_header, fill_type="solid")
+        celda.alignment = Alignment(vertical="center", horizontal="center", wrap_text=True)
+    ws.row_dimensions[2].height = 20
+
+    fila = 3
     for caso in casos:
-        ws.merge_cells(f"A{fila}:B{fila}")
-        celda = ws[f"A{fila}"]
-        celda.value = caso.get("nombre", "Caso de prueba")
-        celda.font = Font(name="Arial", size=13, bold=True, color="FFFFFF")
-        celda.fill = PatternFill(start_color=azul_header, end_color=azul_header, fill_type="solid")
-        celda.alignment = Alignment(vertical="center")
-        ws.row_dimensions[fila].height = 26
-        fila += 1
-
+        nombre = caso.get("nombre", "Caso de prueba")
+        objetivo = caso.get("objetivo", "")
         precondiciones = caso.get("precondiciones", [])
+        pasos = caso.get("pasos", [])
+        resultados = caso.get("resultado_esperado", [])
+
+        descripcion = ""
+        if objetivo:
+            descripcion += "Objetivo: " + objetivo + "\n\n"
         if precondiciones:
-            ws.merge_cells(f"A{fila}:B{fila}")
-            celda = ws[f"A{fila}"]
-            celda.value = "Antes de empezar necesitas:"
-            celda.font = Font(name="Arial", size=10, bold=True)
-            ws.row_dimensions[fila].height = 20
-            fila += 1
-            for pre in precondiciones:
-                ws[f"A{fila}"] = "\u2022"
-                ws[f"A{fila}"].alignment = Alignment(horizontal="center")
-                ws[f"B{fila}"] = pre
-                ws[f"B{fila}"].font = Font(name="Arial", size=10)
-                ws[f"B{fila}"].alignment = Alignment(wrap_text=True, vertical="center")
-                ws.row_dimensions[fila].height = 20
-                fila += 1
+            descripcion += "Precondiciones:\n" + "\n".join("- " + p for p in precondiciones) + "\n\n"
+        if pasos:
+            descripcion += "Pasos:\n" + "\n".join(f"{i+1}. {p}" for i, p in enumerate(pasos)) + "\n\n"
+        if resultados:
+            descripcion += "Resultado esperado:\n" + "\n".join("- " + r for r in resultados)
 
-        for paso in caso.get("pasos", []):
-            ws[f"A{fila}"] = "\u2610"
-            ws[f"A{fila}"].alignment = Alignment(horizontal="center")
-            ws[f"A{fila}"].font = Font(size=14)
-            ws[f"B{fila}"] = paso
-            ws[f"B{fila}"].font = Font(name="Arial", size=10)
-            ws[f"B{fila}"].alignment = Alignment(wrap_text=True, vertical="center")
-            ws.row_dimensions[fila].height = 22
-            fila += 1
+        ws.cell(row=fila, column=1, value=nombre).font = Font(name="Arial", size=10, bold=True)
+        ws.cell(row=fila, column=1).alignment = Alignment(vertical="top", wrap_text=True)
 
-        for resultado in caso.get("resultado_esperado", []):
-            ws[f"A{fila}"] = "\u2713"
-            ws[f"A{fila}"].font = Font(bold=True, color="2E8B57")
-            ws[f"A{fila}"].alignment = Alignment(horizontal="center")
-            ws[f"B{fila}"] = resultado
-            ws[f"B{fila}"].fill = PatternFill(start_color=verde_ok, end_color=verde_ok, fill_type="solid")
-            ws[f"B{fila}"].font = Font(name="Arial", size=10)
-            ws[f"B{fila}"].alignment = Alignment(wrap_text=True, vertical="center")
-            ws.row_dimensions[fila].height = 22
-            fila += 1
+        celda_desc = ws.cell(row=fila, column=2, value=descripcion.strip())
+        celda_desc.font = Font(name="Arial", size=9)
+        celda_desc.alignment = Alignment(vertical="top", wrap_text=True)
+
+        for col in [3, 4, 5, 6]:
+            ws.cell(row=fila, column=col).alignment = Alignment(vertical="top", horizontal="center")
+
+        ws.cell(row=fila, column=7).alignment = Alignment(vertical="top", wrap_text=True)
+
+        num_lineas = descripcion.count("\n") + 2
+        ws.row_dimensions[fila].height = min(max(num_lineas * 12, 30), 300)
 
         fila += 1
 
@@ -145,7 +148,7 @@ def generar_respuesta(pregunta, chunks, historial):
     system_prompt += "- Actuas como un guia conversacional, no solo respondes preguntas sueltas. Si el cliente no ha dicho cuanto tiempo tiene disponible, pregunta al inicio de la conversacion (una sola vez) cuanto tiempo tiene para probar, y prioriza los casos de prueba mas criticos primero segun eso.\n"
     system_prompt += "- Usas la METODOLOGIA DE PEOPLETECH (matriz de pruebas, dimensionador, documentacion de Eslabon Cloud) para saber COMO estructurar y priorizar las pruebas.\n"
     system_prompt += "- Usas los MANUALES Y NORMATIVA DEL CLIENTE (leyes mexicanas, manuales funcionales del sistema) para saber QUE debe cumplir el sistema en el caso especifico de este cliente.\n"
-    system_prompt += "- Si te piden un caso de prueba, estructura: Objetivo, Precondiciones, Pasos, Resultado esperado.\n"
+    system_prompt += "- Cada vez que des el detalle de uno o mas casos de prueba (no en el resumen inicial, sino cuando profundices), estructura SIEMPRE cada caso con estas etiquetas en negritas y en este orden: **Objetivo:**, **Precondiciones:**, **Pasos:**, **Resultado esperado:**. Cada etiqueta en su propia linea, seguida de su contenido (los pasos y resultados pueden ir en lista con guiones debajo de su etiqueta).\n"
     system_prompt += "- Los documentos de METODOLOGIA (dimensionador, matriz de pruebas, documento de analisis) son plantillas genericas de PeopleTech, no la configuracion real de este cliente especifico. Si encuentras que un mismo codigo (ej. un DIP como P010, D019, etc.) tiene significados distintos en diferentes documentos de metodologia, NO elijas uno al azar ni asumas cual es el correcto. En vez de eso, dile al cliente que ese codigo tiene mas de una definicion posible en la plantilla generica y que debe confirmar cual aplica en su configuracion real (puede ser que su equipo de implementacion ya lo haya definido, o que necesite revisarlo con PeopleTech). Los documentos de NORMATIVA/MANUALES DEL CLIENTE si son especificos de este cliente y tienen prioridad si hay conflicto con la metodologia generica.\n\n"
     system_prompt += "- Si la informacion no esta en los documentos, dilo claramente y no inventes.\n\n"
     system_prompt += "Reglas de estilo, muy importantes:\n"
