@@ -29,8 +29,14 @@ app.add_middleware(
 )
 
 
+class Mensaje(BaseModel):
+    rol: str
+    contenido: str
+
+
 class PreguntaRequest(BaseModel):
     pregunta: str
+    historial: list[Mensaje] = []
 
 
 def generar_embedding_pregunta(pregunta):
@@ -51,30 +57,44 @@ def buscar_chunks_relevantes(embedding_pregunta, texto_pregunta):
     return resultado.data
 
 
-def generar_respuesta(pregunta, chunks):
-    contexto = "\n\n---\n\n".join(
-        f"[Fuente: {c['document_name']}]\n{c['content']}" for c in chunks
+def generar_respuesta(pregunta, chunks, historial):
+    normativa_cliente = "\n\n---\n\n".join(
+        f"[Manual/Ley del cliente: {c['document_name']}]\n{c['content']}"
+        for c in chunks if c.get("tipo_documento") == "cliente"
     )
+    metodologia = "\n\n---\n\n".join(
+        f"[Metodologia PeopleTech: {c['document_name']}]\n{c['content']}"
+        for c in chunks if c.get("tipo_documento") == "metodologia"
+    )
+
+    system_prompt = f"""Eres el Asistente de Pruebas de PeopleTech. Ayudas a un CLIENTE (no al equipo interno de PeopleTech) a probar el sistema de nomina Eslabon Cloud que PeopleTech le implemento, dentro del tiempo que el cliente tenga disponible.
+
+Tu forma de trabajar:
+- Actuas como un guia conversacional, no solo respondes preguntas sueltas. Si el cliente no ha dicho cuanto tiempo tiene disponible, pregunta al inicio de la conversacion (una sola vez) cuanto tiempo tiene para probar, y prioriza los casos de prueba mas criticos primero segun eso.
+- Usas la METODOLOGIA DE PEOPLETECH (matriz de pruebas, dimensionador, documentacion de Eslabon Cloud) para saber COMO estructurar y priorizar las pruebas.
+- Usas los MANUALES Y NORMATIVA DEL CLIENTE (leyes mexicanas, manuales funcionales del sistema) para saber QUE debe cumplir el sistema en el caso especifico de este cliente.
+- Si te piden un caso de prueba, estructura: Objetivo, Precondiciones, Pasos, Resultado esperado.
+- Si la informacion no esta en los documentos, dilo claramente y no inventes.
+- Cita siempre de que documento sacaste cada dato relevante.
+- Mantén un tono profesional, claro y eficiente - el cliente probablemente tiene poco tiempo.
+
+METODOLOGIA PEOPLETECH (como probar):
+{metodologia if metodologia else "(sin fragmentos relevantes de metodologia para esta pregunta)"}
+
+MANUALES Y NORMATIVA DEL CLIENTE (que debe cumplir el sistema):
+{normativa_cliente if normativa_cliente else "(sin fragmentos relevantes de normativa/manuales para esta pregunta)"}
+"""
+
+    mensajes = []
+    for m in historial:
+        mensajes.append({"role": m.rol, "content": m.contenido})
+    mensajes.append({"role": "user", "content": pregunta})
 
     mensaje = claude.messages.create(
         model="claude-sonnet-5",
         max_tokens=3000,
-        messages=[
-            {
-                "role": "user",
-                "content": f"""Eres un asistente de QA que ayuda a un equipo a probar el sistema de nómina que PeopleTech implementó para su empresa. Tu trabajo es ayudar a validar que el sistema funcione correctamente según la normativa mexicana aplicable (LFT, LSS, ISR, salarios mínimos, etc.) y según los manuales funcionales del sistema.
-
-Usa ÚNICAMENTE los siguientes documentos de referencia (manuales del sistema y leyes/reglamentos) para responder. Si el usuario pide un caso de prueba, estructura tu respuesta con: Objetivo, Precondiciones, Pasos, Resultado esperado. Si pide una explicación o valida una regla de negocio, respóndelo apoyándote en el manual y/o la ley correspondiente. Si la información no está en los documentos, dilo claramente y no inventes.
-
-DOCUMENTOS DE REFERENCIA:
-{contexto}
-
-PREGUNTA DEL USUARIO:
-{pregunta}
-
-Cita de qué documento (manual o ley) sacaste cada dato relevante."""
-            }
-        ],
+        system=system_prompt,
+        messages=mensajes,
     )
 
     for bloque in mensaje.content:
@@ -91,7 +111,7 @@ def preguntar(request: PreguntaRequest):
     if not chunks:
         return {"respuesta": "No encontre informacion relevante en los documentos.", "fuentes": []}
 
-    respuesta = generar_respuesta(request.pregunta, chunks)
+    respuesta = generar_respuesta(request.pregunta, chunks, request.historial)
     fuentes = list(set(c["document_name"] for c in chunks))
 
     return {"respuesta": respuesta, "fuentes": fuentes}
