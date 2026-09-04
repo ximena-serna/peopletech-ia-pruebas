@@ -170,7 +170,7 @@ def generar_respuesta(pregunta, chunks, historial):
 
     mensaje = claude.messages.create(
         model="claude-sonnet-5",
-        max_tokens=3000,
+        max_tokens=5000,
         system=system_prompt,
         messages=mensajes,
     )
