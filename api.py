@@ -1,5 +1,10 @@
 import os
+import io
+import json
+import base64
 import requests
+import openpyxl
+from openpyxl.styles import Font, PatternFill, Alignment
 from fastapi import FastAPI, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -57,6 +62,67 @@ def buscar_chunks_relevantes(embedding_pregunta, texto_pregunta):
     return resultado.data
 
 
+def generar_excel_casos(casos):
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Casos de Prueba"
+
+    azul_header = "1A1A2E"
+    verde_ok = "D9F2E3"
+
+    ws.column_dimensions["A"].width = 4
+    ws.column_dimensions["B"].width = 65
+
+    fila = 1
+    for caso in casos:
+        ws.merge_cells(f"A{fila}:B{fila}")
+        celda = ws[f"A{fila}"]
+        celda.value = caso.get("nombre", "Caso de prueba")
+        celda.font = Font(name="Arial", size=13, bold=True, color="FFFFFF")
+        celda.fill = PatternFill(start_color=azul_header, end_color=azul_header, fill_type="solid")
+        celda.alignment = Alignment(vertical="center")
+        ws.row_dimensions[fila].height = 26
+        fila += 1
+
+        objetivo = caso.get("objetivo", "")
+        if objetivo:
+            ws.merge_cells(f"A{fila}:B{fila}")
+            celda = ws[f"A{fila}"]
+            celda.value = "Objetivo: " + objetivo
+            celda.font = Font(name="Arial", size=10, italic=True)
+            celda.alignment = Alignment(wrap_text=True, vertical="center")
+            ws.row_dimensions[fila].height = 30
+            fila += 1
+
+        for paso in caso.get("pasos", []):
+            ws[f"A{fila}"] = "\u2610"
+            ws[f"A{fila}"].alignment = Alignment(horizontal="center")
+            ws[f"A{fila}"].font = Font(size=14)
+            ws[f"B{fila}"] = paso
+            ws[f"B{fila}"].font = Font(name="Arial", size=10)
+            ws[f"B{fila}"].alignment = Alignment(wrap_text=True, vertical="center")
+            ws.row_dimensions[fila].height = 22
+            fila += 1
+
+        for resultado in caso.get("resultado_esperado", []):
+            ws[f"A{fila}"] = "\u2713"
+            ws[f"A{fila}"].font = Font(bold=True, color="2E8B57")
+            ws[f"A{fila}"].alignment = Alignment(horizontal="center")
+            ws[f"B{fila}"] = resultado
+            ws[f"B{fila}"].fill = PatternFill(start_color=verde_ok, end_color=verde_ok, fill_type="solid")
+            ws[f"B{fila}"].font = Font(name="Arial", size=10)
+            ws[f"B{fila}"].alignment = Alignment(wrap_text=True, vertical="center")
+            ws.row_dimensions[fila].height = 22
+            fila += 1
+
+        fila += 1
+
+    buffer = io.BytesIO()
+    wb.save(buffer)
+    buffer.seek(0)
+    return base64.b64encode(buffer.read()).decode("utf-8")
+
+
 def generar_respuesta(pregunta, chunks, historial):
     normativa_cliente = "\n\n---\n\n".join(
         f"[Manual/Ley del cliente: {c['document_name']}]\n{c['content']}"
@@ -78,7 +144,12 @@ def generar_respuesta(pregunta, chunks, historial):
     system_prompt += "Reglas de estilo, muy importantes:\n"
     system_prompt += "- NUNCA menciones de que documento, manual, ley, articulo o archivo sacaste la informacion. No cites fuentes, no pongas nombres de archivos, no pongas parentesis con referencias. El cliente no necesita saber de donde sale la informacion, solo necesita la respuesta.\n"
     system_prompt += "- Habla como una persona amigable y cercana, no como un documento tecnico o legal. Explica todo en lenguaje sencillo, como si le hablaras a alguien que no conoce terminos legales ni tecnicos de sistemas.\n"
-    system_prompt += "- NO uses formato markdown: nada de asteriscos para negritas, nada de tablas con simbolos pipe, nada de numerales para titulos. Escribe en texto plano y conversacional, como si estuvieras chateando por WhatsApp. Puedes usar guiones simples para listas cortas si ayuda a la claridad, y saltos de linea para organizar ideas, pero nada mas.\n"
+    system_prompt += "- Usa formato visual y amigable: puedes usar **negritas** (con doble asterisco) para resaltar palabras clave o titulos cortos, y guiones (- ) para listas. NO uses tablas con simbolos pipe ni numerales tipo ### para titulos, eso se ve mal. Usa saltos de linea para separar ideas, como si chatearas por WhatsApp pero mas cuidado.\n"
+    system_prompt += "- Cuando dieras 2 o mas casos de prueba en una sola respuesta, o el usuario pida explicitamente un Excel o algo para marcar/checar, ademas de tu respuesta normal y amigable en el chat, agrega AL FINAL de tu mensaje un bloque de datos oculto (el usuario no vera este bloque, se usa para generar un Excel descargable) con este formato EXACTO:\n"
+    system_prompt += "===EXCEL_DATA===\n"
+    system_prompt += '[{\"nombre\": \"Nombre corto del caso\", \"objetivo\": \"objetivo en una frase\", \"pasos\": [\"paso 1\", \"paso 2\"], \"resultado_esperado\": [\"resultado 1\", \"resultado 2\"]}]\n'
+    system_prompt += "===END_EXCEL_DATA===\n"
+    system_prompt += "Ese bloque debe ser JSON valido (comillas dobles, sin comas sobrantes), un objeto por cada caso de prueba. No uses este bloque si solo estas dando UN caso de prueba o si no te pidieron casos de prueba.\n"
     system_prompt += "- Manten un tono profesional pero calido y eficiente, el cliente probablemente tiene poco tiempo.\n\n"
     system_prompt += "METODOLOGIA PEOPLETECH (como probar):\n"
     system_prompt += metodologia if metodologia else "(sin fragmentos relevantes de metodologia para esta pregunta)"
@@ -109,9 +180,28 @@ def preguntar(request: PreguntaRequest):
     chunks = buscar_chunks_relevantes(embedding, request.pregunta)
 
     if not chunks:
-        return {"respuesta": "No encontre informacion relevante en los documentos.", "fuentes": []}
+        return {"respuesta": "No encontre informacion relevante en los documentos."}
 
     respuesta = generar_respuesta(request.pregunta, chunks, request.historial)
+
+    excel_base64 = None
+    marcador_inicio = "===EXCEL_DATA==="
+    marcador_fin = "===END_EXCEL_DATA==="
+    if marcador_inicio in respuesta:
+        partes = respuesta.split(marcador_inicio)
+        texto_visible = partes[0].strip()
+        resto = partes[1] if len(partes) > 1 else ""
+        if marcador_fin in resto:
+            json_texto = resto.split(marcador_fin)[0].strip()
+            try:
+                casos = json.loads(json_texto)
+                excel_base64 = generar_excel_casos(casos)
+            except Exception as e:
+                print(f"No se pudo generar excel: {e}")
+        respuesta = texto_visible
+
+    if excel_base64:
+        return {"respuesta": respuesta, "excel_base64": excel_base64, "excel_filename": "casos_de_prueba.xlsx"}
 
     return {"respuesta": respuesta}
 
